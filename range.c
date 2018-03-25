@@ -1326,10 +1326,12 @@ range_include_internal(VALUE range, VALUE val)
     return Qundef;
 }
 
+static VALUE r_cover_range_p(VALUE range, VALUE beg, VALUE end, VALUE val);
 
 /*
  *  call-seq:
- *     rng.cover?(obj)  ->  true or false
+ *     rng.cover?(obj)   ->  true or false
+ *     rng.cover?(range) ->  true or false
  *
  *  Returns <code>true</code> if +obj+ is between the begin and end of
  *  the range.
@@ -1337,10 +1339,19 @@ range_include_internal(VALUE range, VALUE val)
  *  This tests <code>begin <= obj <= end</code> when #exclude_end? is +false+
  *  and <code>begin <= obj < end</code> when #exclude_end? is +true+.
  *
- *     ("a".."z").cover?("c")    #=> true
- *     ("a".."z").cover?("5")    #=> false
- *     ("a".."z").cover?("cc")   #=> true
+ *  Returns <code>true</code> for a Range when it is covered by the receiver,
+ *  by comparing the begin and end values directly. This requires the end
+ *  object of the receiver to implement <code>succ</code> if the end of +range+
+ *  is greater than the end of the receiver and +range+ excludes its end, but
+ *  the receiver does not.
+ *
+ *     ("a".."z").cover?("c")      #=> true
+ *     ("a".."z").cover?("5")      #=> false
+ *     ("a".."z").cover?("cc")     #=> true
+ *     ("a".."z").cover?("b".."c") #=> true
+ *     ("a".."z").cover?("0".."z") #=> false
  */
+
 
 static VALUE
 range_cover(VALUE range, VALUE val)
@@ -1349,7 +1360,38 @@ range_cover(VALUE range, VALUE val)
 
     beg = RANGE_BEG(range);
     end = RANGE_END(range);
+
+    if (rb_obj_is_kind_of(val, rb_cRange)) {
+    return RBOOL(r_cover_range_p(range, beg, end, val));
+    }
     return r_cover_p(range, beg, end, val);
+}
+
+static VALUE
+r_cover_range_p(VALUE range, VALUE beg, VALUE end, VALUE val)
+{
+    VALUE val_beg, val_end;
+    int cmp_end;
+
+    val_beg = RANGE_BEG(val);
+    val_end = RANGE_END(val);
+
+    if (!r_cover_p(range, beg, end, val_beg)) return FALSE;
+
+    cmp_end = r_less(end, val_end);
+
+    if (EXCL(range) == EXCL(val)) {
+    return cmp_end >= 0;
+    } else if (EXCL(range)) {
+    return cmp_end > 0;
+    } else if (cmp_end >= 0) {
+    return TRUE;
+    } else if (!discrete_object_p(end)) {
+      rb_raise(rb_eTypeError, "can't iterate from %s",
+        rb_obj_classname(end));
+    }
+
+    return r_less(rb_funcallv(end, id_succ, 0, 0), val_end) == 0;
 }
 
 static VALUE
